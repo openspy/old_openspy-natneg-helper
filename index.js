@@ -3,7 +3,7 @@ var NATNegInitHandler = require('./NATNegInitHandler');
 var redis = require('redis');
 const redisURL = process.env.REDIS_URL || "redis://127.0.0.1";
 var connection = redis.createClient(redisURL);
-var server_event_listener = new ServerEventListener("amqp://guest:guest@localhost", serverEventHandler);
+var server_event_listener = new ServerEventListener(process.env.RABBITMQ_URL || "amqp://guest:guest@localhost", serverEventHandler);
 var init_handler = new NATNegInitHandler(server_event_listener, connection);
 
 var resend_data = {};
