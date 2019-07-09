@@ -19,6 +19,18 @@ NATNegInitHandler.prototype.getNumRequiredAddresses = function(message) {
     return required_addresses;
 }
 
+NATNegInitHandler.prototype.markInitComplete = function(message, opposite_index) {
+    return new Promise(function(resolve, reject) {
+        var index = message.data.clientindex;
+        if(opposite_index) {
+            index = message.data.clientindex == 0 ? 1 : 0;
+        }
+        var redis_key = message.cookie + "_" + index;
+        this.redis_connection.hset(redis_key, "connect_complete", "1", function(err, result) {
+            return resolve(true);
+        }.bind(this));
+    }.bind(this));
+}
 NATNegInitHandler.prototype.checkInitComplete = function(message, opposite_index) {
     return new Promise(function(resolve, reject) {
         var required_addresses = this.getNumRequiredAddresses(message);
@@ -97,6 +109,9 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
     var key = message.cookie + message.data.clientindex;
 
     if(complete) {
+        await this.markInitComplete(message);
+        await this.markInitComplete(message, true);
+
         //call "calculate nat mapping" against address objects for both clients
         var required_addresses = this.getNumRequiredAddresses(message);
         var client_addresses = await this.getAllInitPackets(message.cookie, message.data.clientindex, required_addresses);
