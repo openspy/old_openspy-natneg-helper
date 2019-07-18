@@ -32,11 +32,16 @@ NATNegInitHandler.prototype.markInitComplete = function(message, opposite_index)
     }.bind(this));
 }
 NATNegInitHandler.prototype.checkInitComplete = function(message, opposite_index) {
-    return new Promise(function(resolve, reject) {
+    return new Promise(async function(resolve, reject) {
         var required_addresses = this.getNumRequiredAddresses(message);
         var index = message.data.clientindex;
         if(opposite_index) {
             index = message.data.clientindex == 0 ? 1 : 0;
+
+            var init_data = await this.GetInitData(message.cookie, index);
+
+            if(!init_data) return resolve(false);
+            required_addresses = this.getNumRequiredAddresses({data: init_data});
         }
         var redis_key = message.cookie + "_" + index;
         var redis_init_key = redis_key  + "_init_packets";
@@ -62,7 +67,8 @@ NATNegInitHandler.prototype.getAllInitPackets = function(cookie, client_index, r
         this.redis_connection.hmget(redis_init_key, keys, function(err, result) {
             var addresses = [];
             for(var i=0;i<required_addresses;i++) {
-                addresses.push(JSON.parse(result[i]));
+                if(result[i] != null)
+                    addresses.push(JSON.parse(result[i]));
             }
             resolve(addresses);
         }.bind(this));
@@ -97,6 +103,16 @@ NATNegInitHandler.prototype.sendConnectionSummaryToClients = function(first_clie
     connectCallback(msg, resendCallback);
 }
 
+NATNegInitHandler.prototype.GetInitData = async function(cookie, client_index) {
+    return new Promise(function(resolve, reject) {
+        var redis_init_key = cookie + "_" + client_index + "_init_packets";
+        this.redis_connection.hget(redis_init_key, "1", function(err, result) {
+            var jsonResult = JSON.parse(result);
+            if(jsonResult == null) return resolve(null);
+            resolve(jsonResult.data);
+        }.bind(this));
+    }.bind(this));
+}
 NATNegInitHandler.prototype.handleInitMessage = async function (message, connectCallback) {
     var redis_init_key = message.cookie + "_" + message.data.clientindex + "_init_packets";
     var hset_key = message.data.porttype;
