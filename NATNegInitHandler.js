@@ -1,8 +1,9 @@
 function NATNegInitHandler(server_event_listener, redis_connection) {
     this.server_event_listener = server_event_listener;
     this.redis_connection = redis_connection;
-    this.DEADBEAT_TIMEOUT = 60000;
-    this.REDIS_EXPIRE = 60;
+
+    this.DEADBEAT_TIMEOUT = 60;
+
     this.pending_connections = {};
 }
 NATNegInitHandler.prototype.getNumRequiredAddresses = function(message) {
@@ -27,6 +28,7 @@ NATNegInitHandler.prototype.markInitComplete = function(message, opposite_index)
         }
         var redis_key = message.cookie + "_" + index;
         this.redis_connection.hset(redis_key, "connect_complete", "1", function(err, result) {
+            this.redis_connection.expire(redis_key, this.DEADBEAT_TIMEOUT);
             return resolve(true);
         }.bind(this));
     }.bind(this));
@@ -118,7 +120,7 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
     var hset_key = message.data.porttype;
     var storage_data = JSON.stringify(message);
     this.redis_connection.hset(redis_init_key, hset_key, storage_data);
-    this.redis_connection.expire(redis_init_key, this.REDIS_EXPIRE);
+    this.redis_connection.expire(redis_init_key, this.DEADBEAT_TIMEOUT);
 
     var complete = await this.checkInitComplete(message) && await this.checkInitComplete(message, true);
 
@@ -161,7 +163,7 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
 
                 this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
                 delete this.pending_connections[interval_key];
-            }.bind(this, message, key), this.DEADBEAT_TIMEOUT);
+            }.bind(this, message, key), (this.DEADBEAT_TIMEOUT * 1000));
         }
     }
 }
