@@ -33,11 +33,12 @@ function onConnection(msg, resendCallback) {
 function serverEventHandler(message) {
     switch(message.type) {
         case 'init':
-            //console.log("GOT INIT", message.data, message.from_address);
+            //console.log("GOT INIT", message, message.from_address);
             init_handler.handleInitMessage(message, onConnection);
         break;
         case 'connect_ack':
-            var key = message.from_address + "-" + message.driver_address;            
+            //console.log("connect ack");
+            var key = message.from_address + "-" + message.driver_address + "-" + message.hostname;            
             if(resend_data[key]) {
                 clearInterval(resend_data[key].interval);
                 delete resend_data[key];

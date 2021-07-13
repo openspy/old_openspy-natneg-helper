@@ -77,13 +77,14 @@ NATNegInitHandler.prototype.getAllInitPackets = function(cookie, client_index, r
     }.bind(this));
 }
 
-NATNegInitHandler.prototype.sendConnectionSummaryToClients = function(first_client, second_client, connectCallback) {
+NATNegInitHandler.prototype.sendConnectionSummaryToClients = function(hostname, first_client, second_client, connectCallback) {
     var msg = {};
     msg.type = "connect";
 
     msg.to_address = first_client[1].from_address;
     msg.driver_address = first_client[1].driver_address;
     msg.data = second_client;
+    msg.hostname = hostname;
     //console.log(JSON.stringify(msg));
     this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
 
@@ -124,7 +125,8 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
 
     var complete = await this.checkInitComplete(message) && await this.checkInitComplete(message, true);
 
-    var key = message.cookie + message.data.clientindex;
+    var key = message.cookie + message.data.clientindex + "-" + message.hostname;
+    //console.log("key is", key);
 
     if(complete) {
         await this.markInitComplete(message);
@@ -138,7 +140,7 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
         var opposite_client_addresses = await this.getAllInitPackets(message.cookie, opposite_index, required_addresses);
 
         //send connection info
-        this.sendConnectionSummaryToClients(client_addresses, opposite_client_addresses, connectCallback);
+        this.sendConnectionSummaryToClients(message.hostname, client_addresses, opposite_client_addresses, connectCallback);
 
         if(this.pending_connections[key]) {
             clearTimeout(this.pending_connections[key]);
@@ -159,7 +161,9 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
                 msg.version = deadbeat_info.version;
                 msg.to_address = deadbeat_info.from_address;
                 msg.driver_address = deadbeat_info.driver_address;
+                msg.hostname = deadbeat_info.hostname;
                 msg.data = {finished: 1, cookie: deadbeat_info.cookie};
+                //console.log("deadbeat", msg);
 
                 this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
                 delete this.pending_connections[interval_key];
