@@ -160,6 +160,7 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
                 msg.data = {finished: 1, cookie: deadbeat_info.cookie};
 
                 await this.sendMessageToAssociatedPairs(deadbeat_info.cookie, deadbeat_info.data.clientindex, msg);
+                await this.CleanupConnection(deadbeat_info.cookie, deadbeat_info.data.clientindex);
                 delete this.pending_connections[interval_key];
             }.bind(this, message, key), (this.DEADBEAT_TIMEOUT * 1000));
         }
@@ -171,12 +172,12 @@ NATNegInitHandler.prototype.associateCookieToClientDriverPair = function(cookie,
         var connection_incr_key = "ASSOCINCR_" + cookie + "-" + client_index;
         this.redis_connection.incr(connection_incr_key,function(con_key, peer_data, err, association_index) {
             if(err) return reject();
-            this.redis_connection.expire(con_key, this.DEADBEAT_TIMEOUT);
+            this.redis_connection.expire(con_key, this.DEADBEAT_TIMEOUT * 2);
             var sub_key = "peer_" + association_index;
             var assoc_key = "ASSOC-" + peer_data.cookie + "-" + peer_data.client_index;
             this.redis_connection.hset(assoc_key, sub_key, JSON.stringify(peer_data), function(key, err) {
                 if(err) return reject();
-                this.redis_connection.expire(key, this.DEADBEAT_TIMEOUT);
+                this.redis_connection.expire(key, this.DEADBEAT_TIMEOUT * 2);
                 resolve();
             }.bind(this, assoc_key));
         }.bind(this, connection_incr_key, data_obj));
