@@ -38,6 +38,7 @@ function serverEventHandler(message) {
         break;
         case 'connect_ack':
             var key = message.from_address + "-" + message.driver_address;            
+            init_handler.CleanupConnection(message.cookie, message.clientindex);
             if(resend_data[key]) {
                 clearInterval(resend_data[key].interval);
                 delete resend_data[key];

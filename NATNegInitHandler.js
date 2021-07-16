@@ -80,29 +80,24 @@ NATNegInitHandler.prototype.getAllInitPackets = function(cookie, client_index, r
 NATNegInitHandler.prototype.sendConnectionSummaryToClients = function(first_client, second_client, connectCallback) {
     var msg = {};
     msg.type = "connect";
-
-    msg.to_address = first_client[1].from_address;
-    msg.driver_address = first_client[1].driver_address;
     msg.data = second_client;
-    //console.log(JSON.stringify(msg));
-    this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
+    this.sendMessageToAssociatedPairs(first_client[0].cookie, first_client[0].data.clientindex, msg);
 
-    var resendCallback = function(message) {
-        this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(message)));
-    }.bind(this, msg);
+    var resendCallback = function(cookie, index, message) {
+        this.sendMessageToAssociatedPairs(cookie, index, message);
+    }.bind(this, first_client[0].cookie, first_client[0].data.clientindex, msg);
     connectCallback(msg, resendCallback);
+
+    var second_msg = Object.assign({}, msg);
 
     
-    msg.to_address = second_client[1].from_address;
-    msg.driver_address = second_client[1].driver_address;
-    msg.data = first_client;
-    //console.log(JSON.stringify(msg));
-    this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
+    second_msg.data = first_client;
+    this.sendMessageToAssociatedPairs(second_client[0].cookie, second_client[0].data.clientindex, second_msg);
 
-    resendCallback = function(message) {
-        this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(message)));
-    }.bind(this, msg);
-    connectCallback(msg, resendCallback);
+    resendCallback = function(cookie, index, message) {
+        this.sendMessageToAssociatedPairs(cookie, index, message);
+    }.bind(this, second_client[0].cookie, second_client[0].data.clientindex, second_msg);
+    connectCallback(second_msg, resendCallback);
 }
 
 NATNegInitHandler.prototype.GetInitData = async function(cookie, client_index) {
@@ -117,6 +112,9 @@ NATNegInitHandler.prototype.GetInitData = async function(cookie, client_index) {
 }
 NATNegInitHandler.prototype.handleInitMessage = async function (message, connectCallback) {
     var redis_init_key = message.cookie + "_" + message.data.clientindex + "_init_packets";
+
+    await this.associateCookieToClientDriverPair(message.cookie, message.data.clientindex, message.from_address, message.driver_address, message.hostname);
+
     var hset_key = message.data.porttype;
     var storage_data = JSON.stringify(message);
     this.redis_connection.hset(redis_init_key, hset_key, storage_data);
@@ -152,7 +150,7 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
         }
     } else {
         if(this.pending_connections[key] === undefined) {
-            this.pending_connections[key] = setTimeout(function(deadbeat_info, interval_key) {
+            this.pending_connections[key] = setTimeout(async function(deadbeat_info, interval_key) {
                 var msg = {};
     
                 msg.type = "connect";        
@@ -161,10 +159,69 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
                 msg.driver_address = deadbeat_info.driver_address;
                 msg.data = {finished: 1, cookie: deadbeat_info.cookie};
 
-                this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(msg)));
+                await this.sendMessageToAssociatedPairs(deadbeat_info.cookie, deadbeat_info.data.clientindex, msg);
                 delete this.pending_connections[interval_key];
             }.bind(this, message, key), (this.DEADBEAT_TIMEOUT * 1000));
         }
     }
+}
+NATNegInitHandler.prototype.associateCookieToClientDriverPair = function(cookie, client_index, client_address, driver_address, hostname) {
+    return new Promise(function(resolve, reject) {
+        var data_obj = {cookie, client_index, client_address, driver_address, hostname};
+        var connection_incr_key = "ASSOCINCR_" + cookie + "-" + client_index;
+        this.redis_connection.incr(connection_incr_key,function(con_key, peer_data, err, association_index) {
+            if(err) return reject();
+            this.redis_connection.expire(con_key, this.DEADBEAT_TIMEOUT);
+            var sub_key = "peer_" + association_index;
+            var assoc_key = "ASSOC-" + peer_data.cookie + "-" + peer_data.client_index;
+            this.redis_connection.hset(assoc_key, sub_key, JSON.stringify(peer_data), function(key, err) {
+                if(err) return reject();
+                this.redis_connection.expire(key, this.DEADBEAT_TIMEOUT);
+                resolve();
+            }.bind(this, assoc_key));
+        }.bind(this, connection_incr_key, data_obj));
+    }.bind(this));
+}
+NATNegInitHandler.prototype.sendMessageToAssociatedPairs = function(cookie, client_index, data) {
+    return new Promise(function(resolve, reject) {
+        var assoc_key = "ASSOC-" + cookie + "-" + client_index;
+        var handleScanResults = null;
+        var performScan = function(cursor) {
+            this.redis_connection.hscan(assoc_key, cursor, "MATCH", "*", handleScanResults.bind(this));
+        }.bind(this);
+        handleScanResults = function(err, res) {
+            if(err) return reject(err);
+            var c = parseInt(res[0]);
+            if(res[1] && res[1].length > 0) {
+                var idx = 0;
+                for(key of res[1]) {
+                    if(idx++ % 2) {
+                        var peer_data = JSON.parse(key);
+                        this.sendMessageToPeer(peer_data, data);  
+                    }
+                }
+            }
+            if(c != 0) {
+                performScan(c);
+            } else {
+                resolve();
+            }
+        }.bind(this);
+        performScan(0);
+    }.bind(this));
+}
+NATNegInitHandler.prototype.sendMessageToPeer = function(peer_data, message_data) {
+    let send_message = Object.assign({}, message_data);
+    send_message.to_address = peer_data.client_address;
+    send_message.driver_address = peer_data.driver_address;
+    send_message.hostname = peer_data.hostname;
+    this.server_event_listener.sendChannelMessage(Buffer.from(JSON.stringify(send_message)));
+}
+NATNegInitHandler.prototype.CleanupConnection = async function(cookie, client_index) {
+    var assoc_key = "ASSOC-" + cookie + "-" + client_index;
+    await this.redis_connection.del(assoc_key);
+
+    var connection_incr_key = "ASSOCINCR_" + cookie + "-" + client_index;
+    await this.redis_connection.del(connection_incr_key);
 }
 module.exports = NATNegInitHandler;
