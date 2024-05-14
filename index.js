@@ -2,7 +2,7 @@ var ServerEventListener = require('./NATNegEventListener');
 var NATNegInitHandler = require('./NATNegInitHandler');
 var redis = require('redis');
 const redisURL = process.env.REDIS_URL || "redis://127.0.0.1";
-var connection = redis.createClient(redisURL);
+var connection = redis.createClient({url: redisURL});
 var server_event_listener = new ServerEventListener(process.env.RABBITMQ_URL || "amqp://guest:guest@localhost", serverEventHandler);
 var init_handler = new NATNegInitHandler(server_event_listener, connection);
 
@@ -34,6 +34,7 @@ function serverEventHandler(message) {
     switch(message.type) {
         case 'init':
             //console.log("GOT INIT", message.data, message.from_address);
+//	    message.data.usegameport = 0;
             init_handler.handleInitMessage(message, onConnection);
         break;
         case 'connect_ack':

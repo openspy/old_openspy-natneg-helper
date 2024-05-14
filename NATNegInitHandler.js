@@ -4,14 +4,16 @@ function NATNegInitHandler(server_event_listener, redis_connection) {
 
     this.DEADBEAT_TIMEOUT = 60;
 
+    this.CLEANUP_DELAY = 30;
+
     this.pending_connections = {};
 }
 NATNegInitHandler.prototype.getNumRequiredAddresses = function(message) {
     var required_addresses = 0;
     if(message.data.usegameport > 0) {
-        required_addresses++;
+        //required_addresses++;
     }
-    if(message.version >= 2) {
+    if(message.version >= 1) {
         required_addresses += 2;
     }
     if(message.version >= 3) {
@@ -130,10 +132,12 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
 
         //call "calculate nat mapping" against address objects for both clients
         var required_addresses = this.getNumRequiredAddresses(message);
-        var client_addresses = await this.getAllInitPackets(message.cookie, message.data.clientindex, required_addresses);
+
+        var client_addresses = await this.getAllInitPackets(message.cookie, message.data.clientindex, required_addresses + 1); //+1 incase of game port data, which is optional
 
         var opposite_index = message.data.clientindex == 0 ? 1 : 0;
-        var opposite_client_addresses = await this.getAllInitPackets(message.cookie, opposite_index, required_addresses);
+        var opposite_client_addresses = await this.getAllInitPackets(message.cookie, opposite_index, required_addresses + 1); //+1 incase of game port data, which is optional
+
 
         //send connection info
         this.sendConnectionSummaryToClients(client_addresses, opposite_client_addresses, connectCallback);
@@ -160,7 +164,10 @@ NATNegInitHandler.prototype.handleInitMessage = async function (message, connect
                 msg.data = {finished: 1, cookie: deadbeat_info.cookie};
 
                 await this.sendMessageToAssociatedPairs(deadbeat_info.cookie, deadbeat_info.data.clientindex, msg);
-                await this.CleanupConnection(deadbeat_info.cookie, deadbeat_info.data.clientindex);
+                setTimeout(async function(cookie, clientindex) {
+                    await this.CleanupConnection(cookie, clientindex);
+                }.bind(this, deadbeat_info.cookie, deadbeat_info.data.clientindex), this.CLEANUP_DELAY * 1000);
+                
                 delete this.pending_connections[interval_key];
             }.bind(this, message, key), (this.DEADBEAT_TIMEOUT * 1000));
         }
